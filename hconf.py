@@ -1,5 +1,6 @@
 import os
 """
+heudiconv config file implementing 'infotodict'
 run like
 heudiconv -b -o /Volumes/Hera/Raw/BIDS/SlipsPilot -c dcm2niix -f hconf.py  -d '/Volumes/Hera/Raw/MRprojects/SlipsPilot/20*/{subject}_*/*/*'  -s $ID
 
@@ -7,9 +8,8 @@ N.B. hardlinked within/between bids/ and scripts/
 """
 
 
-def create_key(template, outtype=('nii.gz',), annotation_classes=None):
-    if template is None or not template:
-        raise ValueError('Template must be a valid format string')
+def create_key(modality, fname, outtype=('nii.gz',), annotation_classes=None):
+    template = "sub-{subject}/%s/sub-{subject}_%s" % (modality, fname)
     return template, outtype, annotation_classes
 
 
@@ -23,21 +23,19 @@ def infotodict(seqinfo):
     session: scan index for longitudinal acq
     """
 
-    nii = ('nii.gz')
-
-    t1 = create_key('sub-{subject}/anat/sub-{subject}_T1w', outtype=nii)
-    fmapAP = create_key('sub-{subject}/fmap/sub-{subject}_dir-AP_epi', outtype=nii)
-    fmapPA = create_key('sub-{subject}/fmap/sub-{subject}_dir-PA_epi', outtype=nii)
+    t1 = create_key('anat', 'T1w')
+    fmapAP = create_key('fmap', 'dir-AP_epi')
+    fmapPA = create_key('fmap', 'dir-PA_epi')
     # task
-    ID = create_key('sub-{subject}/func/sub-{subject}_task-ID_bold', outtype=nii)
-    OD = create_key('sub-{subject}/func/sub-{subject}_task-OD_bold', outtype=nii)
-    SOA = create_key('sub-{subject}/func/sub-{subject}_task-SOA_bold', outtype=nii)
-    DD = create_key('sub-{subject}/func/sub-{subject}_task-DD_bold', outtype=nii)
+    ID = create_key('func', 'task-ID_bold')
+    OD = create_key('func', 'task-OD_bold')
+    SOA = create_key('func', 'task-SOA_bold')
+    DD = create_key('func', 'task-DD_bold')
     # ref
-    IDref = create_key('sub-{subject}/func/sub-{subject}_task-ID_sbref', outtype=nii)
-    ODref = create_key('sub-{subject}/func/sub-{subject}_task-OD_sbref', outtype=nii)
-    SOAref = create_key('sub-{subject}/func/sub-{subject}_task-SOA_sbref', outtype=nii)
-    DDref = create_key('sub-{subject}/func/sub-{subject}_task-DD_sbref', outtype=nii)
+    IDref = create_key('func', 'task-ID_sbref')
+    ODref = create_key('func', 'task-OD_sbref')
+    SOAref = create_key('func', 'task-SOA_sbref')
+    DDref = create_key('func', 'task-DD_sbref')
 
     info = {t1: [],
             fmapAP: [], fmapPA: [],
