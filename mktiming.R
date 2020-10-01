@@ -89,6 +89,7 @@ findcsv <- function(path, phase)
 
 mk1d_from_folder <- function(infolder){
   subj <- gsub('.*SlipsOfAction/|/$','', infolder) %>% gsub('/','_',.)
+  subj <- gsub('_.*','', subj)
   outfolder <- sprintf('1d/%s/', subj)
   
   if(dir.exists(outfolder) && !OVERWRITE){
