@@ -1,0 +1,32 @@
+** New block design behavior
+
+#+begin_src R :session :file imgs/blk_behave.png :results graphics file
+  library(dplyr); library(glue); library(ggplot2); library(tidyr)
+  theme_set(cowplot::theme_cowplot()) 
+
+  subjid <- '11793'
+  files <- Sys.glob(glue('/Volumes/L/bea_res/Data/Tasks/SlipsOfAction/{subjid}*/*/*.csv'))
+  d <- files %>%
+    grep(., pattern='DD|SOA', value=T) %>%
+    lapply(read.csv) %>%
+    bind_rows %>%
+    separate(extra,c('task','ndeval')) %>%
+    filter(ttype == "TrialType.SHOW") %>%
+    mutate(deval = deval=='True',
+	   score = ifelse(
+	     (deval & resp_raw=="None") | (!deval & score_raw==1),
+	     'correct',
+	     'error'),
+	   score = ifelse(resp_raw!="None" & deval & score_raw==0, "wrong_dir", score))
+
+  ggplot(d) +
+    aes(x=score, fill=deval) +
+    geom_bar(stat="count")+
+    facet_grid(task~ndeval) +
+    ggtitle(glue("{subjid} trial performance")) +
+    scale_fill_manual(values=c("green","red")) +
+    theme(axis.text.x=element_text(angle=45, hjust=1))
+#+end_src
+
+#+RESULTS:
+[[file:imgs/blk_behave.png]]
