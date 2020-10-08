@@ -6,21 +6,22 @@
 
   subjid <- '11793'
   files <- Sys.glob(glue('/Volumes/L/bea_res/Data/Tasks/SlipsOfAction/{subjid}*/*/*.csv'))
+
   d <- files %>%
     grep(., pattern='DD|SOA', value=T) %>%
     lapply(read.csv) %>%
     bind_rows %>%
     separate(extra,c('task','ndeval')) %>%
     filter(ttype == "TrialType.SHOW") %>%
-    mutate(deval = deval=='True',
-	   score = ifelse(
-	     (deval & resp_raw=="None") | (!deval & score_raw==1),
-	     'correct',
-	     'error'),
-	   score = ifelse(resp_raw!="None" & deval & score_raw==0, "wrong_dir", score))
+    mutate(deval = deval == 'True',
+	   resp_type = case_when(
+	     resp_raw != "None" & score_raw %in% c(-1, 1) ~ "correct_dir",
+	     resp_raw != "None" & score_raw == 0          ~ "wrong_dir", 
+	     resp_raw == "None"                           ~ "None",
+	     TRUE                                         ~ "unkown_state"))
 
   ggplot(d) +
-    aes(x=score, fill=deval) +
+    aes(x=resp_type, fill=deval) +
     geom_bar(stat="count")+
     facet_grid(task~ndeval) +
     ggtitle(glue("{subjid} trial performance")) +
@@ -30,3 +31,45 @@
 
 #+RESULTS:
 [[file:imgs/blk_behave.png]]
+
+** Learned pairs?
+#+begin_src R :session :file imgs/blk_survey.png :results graphics file
+  library(cowplot)
+  srvy <- files %>%
+    grep(pattern="SURVEY", value=T, .) %>%
+    read.table(header=T) %>%
+    mutate(iscorrect=iscorrect=="True")
+
+  sidebar <- srvy %>%
+    filter(type=="side") %>%
+    rename(side=correct, learned=iscorrect) %>% 
+    ggplot() +
+    aes(x=side, fill=learned) +
+    geom_bar(stat="count", position = "dodge") +
+    ggtitle('survey fruit direction')
+
+  sidepnt <-
+    srvy %>%
+    filter(type=="side") %>%
+    rename(side=correct, learned=iscorrect, fruit=disp) %>% 
+    ggplot() +
+    aes(x=side, y=fruit, color=learned) +
+    geom_point(size=2) +
+    ggtitle('fruit side')
+
+  assoc_plt <- srvy %>%
+    filter(type=="pair") %>%
+    rename(fruit=disp, learned=iscorrect) %>%
+    ggplot() + aes(x=fruit, y=pick, color=learned) +
+    geom_point(size=3) +
+    ggtitle('survey fruit assoc')
+
+  plot_grid(sidebar,
+	    plot_grid(sidepnt   + theme(legend.position="none"),
+		      assoc_plt + theme(legend.position="none"),
+		      nrow=2),
+	    rel_widths=c(1,2))
+#+end_src
+
+#+RESULTS:
+[[file:imgs/blk_survey.png]]
