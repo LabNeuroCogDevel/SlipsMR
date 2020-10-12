@@ -4,6 +4,7 @@
  library(tidyr)
  library(cowplot)
  theme_set(theme_cowplot()) 
+#remotes::install_github("coolbutuseless/ggpattern")
 
 
 get_ids <- function(f_name){
@@ -68,7 +69,7 @@ plot_SOADD <-function (files) {
     facet_grid(task~ndeval) + 
     scale_fill_manual(values=c("gray50","lightblue"))+
     theme(axis.text.x=element_text(angle=20, hjust=1))+
-    ggtitle(glue("{subjid} SOA+DD"))
+    ggtitle(glue("SOA+DD"))
 
   return(plot_grid(plt_resp, plt_correct, nrow=2, rel_heights = c(.6,.4)))
 }
@@ -143,6 +144,44 @@ plot_ID <- function(files) {
     plt_ratio, nrow=2))
 }
 
+OD_data <- function(files) {
+  OD <- files %>%
+    grep(pattern="OD", value=T, .) %>%
+    last %>%
+    read.csv(., stringsAsFactors=F)
+
+  x <- OD %>%
+      filter(grepl("SHOW",ttype)) %>%
+      select(trial, LR1, LR2, deval, cor_side,
+             top, bottom, resp_side_raw, rt_raw, score_raw) %>% 
+      mutate(deval=deval=="True",
+             devalued_fruit=ifelse(deval,top   , bottom),
+             valued_fruit  =ifelse(deval,bottom, top),
+             value_pos     =ifelse(deval,'bottom','top'),
+             deval_pos     =ifelse(deval,'top'   ,'bottom'),
+             cor_side = substr(ifelse(deval,LR2,LR1),0,1))
+}
+plot_OD <- function(files) {
+  OD <- OD_data(files)
+
+  dbled <- OD %>%
+      select(cor_side, score=score_raw, devalued_fruit, valued_fruit, value_pos, deval_pos) %>%
+      gather(status, fruit, -score, -cor_side, -value_pos, -deval_pos) %>% 
+      mutate(correct=factor(score, levels=c(0,1)),
+             status =gsub('_fruit','',status),
+             pos = ifelse(status=="valued",value_pos, deval_pos))
+
+  x_colors <- x %>% filter(!deval) %>% select(cor_side, fruit=top) %>% distinct %>% 
+            with(cor_side[order(fruit)]) %>% color_lr
+
+  OD_plot <- ggplot(dbled) +
+      ggtitle("OD (6 total/fruit - viewed as deval vs valued)") + 
+      aes(x=fruit, fill=paste(correct, pos)) +
+      geom_bar(stat='count', position='dodge') +
+      facet_grid(status~.)+
+      scale_fill_manual(values=c("black", "gray33", "green", "lightgreen")) +
+      theme(axis.text.x=element_text(angle=20, hjust=1, colour=x_colors))
+}
 survey_data <- function(files){
    srvy <- files %>%
      grep(pattern="SURVEY", value=T, .) %>%
@@ -169,7 +208,7 @@ plot_survey <- function(files) {
      ggplot() +
      aes(x=side, fill=learned) +
      geom_bar(stat="count") +
-     ggtitle(glue('{subjid} survey'))+
+     ggtitle(glue('Survey'))+
      scale_fill_manual(values=TF_colors, drop=F) +
      theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0))
 
@@ -231,6 +270,7 @@ plot_behave <- function(subjid) {
   files <- get_files(subjid)
   return(list(ID=plot_ID(files),
               SOADD=plot_SOADD(files),
+              OD=plot_OD(files),
               survey=plot_survey(files)))
 }
 
@@ -260,5 +300,5 @@ plot_pdfs <- function() {
 
 plot_pdfs()
 
-d88 <-subj_data(subjid='11688') # inspect ID mprage (all kiwi?)
+d88 <-subj_data(subjid='11688') # inspect ID. fix NA score
 d93 <-subj_data(subjid='11793') # fix colors
