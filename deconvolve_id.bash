@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+env |grep -q ^DRYRUN= && DRYRUN=echo || DRYRUN=""
+[ -n "$DRYRUN" ] && DRYTEE(){ tee;} || DRYEE(){ echo "# would save output to $@"; cat;}
 
 scriptdir=$(cd $(dirname $0);pwd)
 subjsdir=$scriptdir/../preproc/func
 filename=nfaswdktm_func_4.nii.gz
-prefix=ID
 
 # Find subj id
 [ $# -ne 1 ] && echo "need a subject directory as first argument!" && exit 1
@@ -12,6 +13,8 @@ subjid=$(basename "$1")
 s=$subjid
 [ ! -d "$s" ] && s=$subjsdir/$s
 [ ! -d "$s" ] && echo "cannot find subj dir ('$1' or '$s')" && exit 1
+
+prefix=${subjid}_ID
 
 # Go to subj dir
 cd $s/*ID_bold
@@ -38,12 +41,12 @@ censorFile=$sdir/motion_info/fd_0.8_censor.1D
 echo "Running!"
 
 # Run deconv
-3dDeconvolve  \
+$DRYRUN 3dDeconvolve  \
     -input $fourdfile \
         -allzero_OK \
         -local_times \
         -polort 2 \
-        -GOFORIT 2 \
+        -GOFORIT 8 \
         -jobs 32 \
         -censor $censorFile \
         -num_stimts 5 \
@@ -55,8 +58,8 @@ echo "Running!"
         -num_glt 3 \
         -gltsym 'SYM:.5*ID_L_cor +.5*ID_R_cor' -glt_label 1 cor \
         -gltsym 'SYM:.5*ID_L_cor +.5*ID_R_cor -.5*ID_L_err -.5*ID_R_err' -glt_label 2 cor_vs_err \
-        -gltsym 'SYM:.5*ID_L_cor -.5*ID_R_cor +.5*ID_L_err -.5*ID_R_err' -glt_label 3 L_vs_R \
+        -gltsym 'SYM:.5*ID_L_cor -.5*ID_R_cor' -glt_label 3 L_vs_R_cor \
         -overwrite \
         -fout -tout -x1D Xmat.x1D -bucket ${prefix}_${model}_stats2 \
-        -errts nfswdktm_${model}_resid.nii.gz \
-        > ${sdir}/deconv.log
+        -errts nfaswdktm_${model}_resid.nii.gz \
+        | DRYTEE ${sdir}/deconv.log
