@@ -27,8 +27,7 @@ SOADD_data <- function(files) {
 	     resp_raw != "None" & score_raw == 0          ~ "wrong_dir", 
 	     resp_raw == "None"                           ~ "None",
 	     TRUE                                         ~ "unkown_state"),
-    iscorrect = factor(iscorrect, levels=c(T,F)),
-    trial_type=ifelse(deval,'devalued','valued')) %>%
+    trial_type=ifelse(deval,'devalued','valued'))
 }
 
 plot_SOADD <-function (files) { 
@@ -49,8 +48,8 @@ plot_SOADD <-function (files) {
     mutate(total_trials=n()) %>%
     group_by(responded, deval, task, ndeval, total_trials) %>%
     tally() %>%
-    mutate(trial_type=ifelse(deval,'devalued','valued')) %>%
-    mutate(rat = n/total_trials) 
+    mutate(trial_type=ifelse(deval,'devalued','valued'),
+           rat = n/total_trials) 
 
   plt_resp <-
     ggplot(soadd_smry)+
@@ -134,19 +133,19 @@ survey_data <- function(files){
      read.table(header=T) %>%
      mutate(iscorrect=iscorrect=="True",
             iscorrect = factor(iscorrect, levels=c(T,F))) %>%
-     $rename(side=correct, learned=iscorrect, fruit=disp)
+     rename(side=correct, learned=iscorrect, fruit=disp)
 }
 
 plot_survey <- function(files) { 
    subjid <- get_ids(files)
    srvy <- survey_data(files)
-   TF_colors <- c("red","green")
+   TF_colors <- c("#2ca25f","#fc9272") # T=green, F=red
 
    sidebar <- srvy %>%
      filter(type=="side") %>%
      ggplot() +
      aes(x=side, fill=learned) +
-     geom_bar(stat="count", position = "dodge") +
+     geom_bar(stat="count") +
      ggtitle(glue('{subjid} survey'))+
      scale_fill_manual(values=TF_colors, drop=F)
 
@@ -162,7 +161,8 @@ plot_survey <- function(files) {
 
    assoc_plt <- srvy %>%
      filter(type=="pair") %>%
-     ggplot() + aes(x=fruit, y=pick, color=learned) +
+     ggplot() +
+     aes(x=fruit, y=pick, color=learned) +
      geom_point(size=3) +
      ggtitle('survey fruit assoc')+
      scale_color_manual(values=TF_colors, drop=F)
@@ -187,17 +187,17 @@ plot_pdfs <- function() {
     subjid<-'11793'
     subj_plots <- lapply(subjs_IDmprage, plot_behave)
 
-    pdf('imgs/behave.pdf')
-    for(p in subj_plots) {
-        print(p)
-    }
-    dev.off()
+    # pdf('imgs/behave.pdf')
+    # for(p in subj_plots) {
+    #     print(p)
+    # }
+    # dev.off()
 
-    pdf('imgs/behave-SOADD.pdf')
-    for(p in subj_plots) {
-        print(p$SOADD)
-    }
-    dev.off()
+    # pdf('imgs/behave-SOADD.pdf')
+    # for(p in subj_plots) {
+    #     print(p$SOADD)
+    # }
+    # dev.off()
 
     pdf('imgs/behave-perpart.pdf', height=11, width=11)
     for(p in subj_plots) {
