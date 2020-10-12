@@ -27,19 +27,20 @@ def infotodict(seqinfo):
     fmapAP = create_key('fmap', 'dir-AP_epi')
     fmapPA = create_key('fmap', 'dir-PA_epi')
     # task
-    ID = create_key('func', 'task-ID_bold')
+    IDlong = create_key('func', 'task-IDlong_bold')
+    IDshort = create_key('func', 'task-IDshort_run-{item:02d}_bold')
     OD = create_key('func', 'task-OD_bold')
-    SOA = create_key('func', 'task-SOA_bold')
-    DD = create_key('func', 'task-DD_bold')
+    SOA = create_key('func', 'task-SOAblk_bold')
+    DD = create_key('func', 'task-DDblk_bold')
     # ref
-    IDref = create_key('func', 'task-ID_sbref')
+    IDref = create_key('func', 'task-IDshort_run-{item:02d}_sbref')
     ODref = create_key('func', 'task-OD_sbref')
-    SOAref = create_key('func', 'task-SOA_sbref')
-    DDref = create_key('func', 'task-DD_sbref')
+    SOAref = create_key('func', 'task-SOAblk_sbref')
+    DDref = create_key('func', 'task-DDblk_sbref')
 
     info = {t1: [],
             fmapAP: [], fmapPA: [],
-            ID: [], OD: [], SOA: [], DD: [],
+            IDlong: [], IDshort: [],  OD: [], SOA: [], DD: [],
             IDref: [], ODref: [], SOAref: [], DDref: [], }
     for s in seqinfo:
         if (s.dim3 == 176) and (s.dim4 == 1) and ('MPRAGE' in s.protocol_name):
@@ -50,8 +51,14 @@ def infotodict(seqinfo):
         elif (s.dim4 == 2) and ('SpinEchoFieldMap_PA' in s.protocol_name):
             info[fmapPA] = [s.series_id]
 
+        # N.B. should no longer exist as of 20201008
+        # was just ID instead of IDlong
         elif (s.dim4 >= 758) and ('ID' in s.protocol_name):
-            info[ID] = [s.series_id]
+            info[IDlong] = [s.series_id]
+
+        elif (s.dim4 >= 147/.8 and ('ID' in s.protocol_name)):
+            info[IDshort].append(s.series_id)
+
         elif (s.dim4 == 1) and ('ID' in s.protocol_name) and ('SBRef' in s.dcm_dir_name):
             info[IDref] = [s.series_id]
 

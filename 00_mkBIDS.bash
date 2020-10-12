@@ -11,8 +11,11 @@ rawdir=../raw
 #  20200930WF  init
 for d in $rawdir/*/1*_2*/; do
    s=$(basename $d|cut -f1 -d_)
-   nconv=$(find -L $bidsdir/sub-$s -iname '*nii.gz' 2>/dev/null |wc -l)
+   nconv=0
+   [ -d $bidsdir/sub-$s ] && 
+      nconv=$(find -L $bidsdir/sub-$s -iname '*nii.gz' 2>/dev/null |wc -l)
    [ -z "$OVERWRITE" -a $nconv -gt 0 ] &&
       echo "# skipping '$d': already have $nconv niftis" && continue
+
    $DRYRUN heudiconv $OVERWRITE -b -o $bidsdir -c dcm2niix -f $bidsdir/hconf.py  -d "$rawdir/20*/{subject}_*/*/*" -s $s
 done

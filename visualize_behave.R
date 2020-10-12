@@ -1,12 +1,20 @@
-** New block design behavior
+ library(dplyr)
+ library(glue)
+ library(ggplot2)
+ library(tidyr)
+ library(cowplot)
+ theme_set(theme_cowplot()) 
 
-#+begin_src R :session :file imgs/blk_behave.png :results graphics file
-  library(dplyr); library(glue); library(ggplot2); library(tidyr)
-  theme_set(cowplot::theme_cowplot()) 
 
-  subjid <- '11793'
+get_ids <- function(f_name){
+   stringr::str_match(f_name, '(?<=/)\\d{5}') %>% unique
+}
+get_files <- function(subjid) {
   files <- Sys.glob(glue('/Volumes/L/bea_res/Data/Tasks/SlipsOfAction/{subjid}*/*/*.csv'))
+}
 
+
+SOADD_data <- function(files) {
   soadd <- files %>%
     grep(., pattern='DD|SOA', value=T) %>%
     lapply(read.csv) %>%
@@ -19,7 +27,13 @@
 	     resp_raw != "None" & score_raw == 0          ~ "wrong_dir", 
 	     resp_raw == "None"                           ~ "None",
 	     TRUE                                         ~ "unkown_state"),
-    trial_type=ifelse(deval,'devalued','valued'))
+    iscorrect = factor(iscorrect, levels=c(T,F)),
+    trial_type=ifelse(deval,'devalued','valued')) %>%
+}
+
+plot_SOADD <-function (files) { 
+  subjid <- get_ids(files)
+  soadd <- SOADD_data(files)
 
   plt_correct <-
     ggplot(soadd) +
@@ -46,17 +60,12 @@
     facet_grid(task~ndeval) + 
     scale_fill_manual(values=c("gray50","lightblue"))+
     theme(axis.text.x=element_text(angle=20, hjust=1))+
-    ggtitle(glue("{subjid} trial performance"))
+    ggtitle(glue("{subjid} SOA+DD"))
 
-  plot_grid(plt_resp, plt_correct, nrow=2, rel_heights = c(.6,.4))
-#+end_src
+  return(plot_grid(plt_resp, plt_correct, nrow=2, rel_heights = c(.6,.4)))
+}
 
-#+RESULTS:
-[[file:imgs/blk_behave.png]]
-
-** DONE Learned pairs?
-*** ID groups
-#+begin_src R :session :file imgs/blk_ID.png :results graphics file
+ID_data <- function(files) {
   box_file <- sprintf("%s/boxes.txt",dirname(files[1]))
   boxes <- read.table(text=system(glue("sed 's/[^A-Za-z.0-9]\\+/ /g' {box_file}"),intern=T))
   names(boxes) <- c('LR1','stim_fruit','resp_fruit','corret_side')
@@ -76,13 +85,18 @@
     select(task,tasknum, trial, onset, LR1, cor_side, score_raw,resp_raw, inside_fruit) %>%
     merge(boxes[,1:3], by="LR1")  %>%
     arrange(tasknum, onset) %>% mutate(n=1:n(), cmscore=cumsum(score_raw))
+}
+plot_ID <- function(files) {
 
+  subjid <- get_ids(files)
+  ID <- ID_data(files)
 
   plt_cumlative_all <- ggplot(ID) +
     aes(x=n,y=cmscore, linetype=task) +
     geom_line() +
     scale_linetype_manual(values=c(2,1,2))+
-    theme(legend.position = "none")
+    theme(legend.position = "none") + 
+    ggtitle(glue("{subjid} ID perf"))
 
   plt_cumlative_fruit <-
     ID %>% group_by(stim_fruit) %>%
@@ -109,52 +123,88 @@
     facet_wrap(~stim_fruit) +
     theme(axis.text.x=element_text(angle=45, hjust=1))
 
-  plot_grid(
+  return(plot_grid(
     plot_grid(plt_cumlative_all, plt_cumlative_fruit, ncol=2),
-    plt_ratio, nrow=2)
-#+end_src
+    plt_ratio, nrow=2))
+}
 
-#+RESULTS:
-[[file:imgs/blk_ID.png]]
-
-*** survey
- #+begin_src R :session :file imgs/blk_survey.png :results graphics file
-   library(cowplot)
+survey_data <- function(files){
    srvy <- files %>%
      grep(pattern="SURVEY", value=T, .) %>%
      read.table(header=T) %>%
-     mutate(iscorrect=iscorrect=="True")
+     mutate(iscorrect=iscorrect=="True",
+            iscorrect = factor(iscorrect, levels=c(T,F))) %>%
+     $rename(side=correct, learned=iscorrect, fruit=disp)
+}
+
+plot_survey <- function(files) { 
+   subjid <- get_ids(files)
+   srvy <- survey_data(files)
+   TF_colors <- c("red","green")
 
    sidebar <- srvy %>%
      filter(type=="side") %>%
-     rename(side=correct, learned=iscorrect) %>% 
      ggplot() +
      aes(x=side, fill=learned) +
      geom_bar(stat="count", position = "dodge") +
-     ggtitle('survey fruit direction')
+     ggtitle(glue('{subjid} survey'))+
+     scale_fill_manual(values=TF_colors, drop=F)
 
    sidepnt <-
      srvy %>%
      filter(type=="side") %>%
-     rename(side=correct, learned=iscorrect, fruit=disp) %>% 
      ggplot() +
      aes(x=side, y=fruit, color=learned) +
      geom_point(size=2) +
-     ggtitle('fruit side')
+     ggtitle('fruit side')+
+     scale_color_manual(values=TF_colors, drop=F)
+
 
    assoc_plt <- srvy %>%
      filter(type=="pair") %>%
-     rename(fruit=disp, learned=iscorrect) %>%
      ggplot() + aes(x=fruit, y=pick, color=learned) +
      geom_point(size=3) +
-     ggtitle('survey fruit assoc')
+     ggtitle('survey fruit assoc')+
+     scale_color_manual(values=TF_colors, drop=F)
 
-   plot_grid(sidebar,
+
+  return(plot_grid(sidebar,
 	     plot_grid(sidepnt   + theme(legend.position="none"),
 		       assoc_plt + theme(legend.position="none"),
 		       nrow=2),
-	     rel_widths=c(1,2))
- #+end_src
+	     rel_widths=c(1,2)))
+}
 
- #+RESULTS:
- [[file:imgs/blk_survey.png]]
+plot_behave <- function(subjid) {
+  files <- get_files(subjid)
+  return(list(ID=plot_ID(files),
+              SOADD=plot_SOADD(files),
+              survey=plot_survey(files)))
+}
+
+plot_pdfs <- function() {
+    subjs_IDmprage <- Sys.glob('/Volumes/L/bea_res/Data/Tasks/SlipsOfAction/*/*/ID_mprage*.csv') %>% get_ids
+    subjid<-'11793'
+    subj_plots <- lapply(subjs_IDmprage, plot_behave)
+
+    pdf('imgs/behave.pdf')
+    for(p in subj_plots) {
+        print(p)
+    }
+    dev.off()
+
+    pdf('imgs/behave-SOADD.pdf')
+    for(p in subj_plots) {
+        print(p$SOADD)
+    }
+    dev.off()
+
+    pdf('imgs/behave-perpart.pdf', height=11, width=11)
+    for(p in subj_plots) {
+                                        #p[['ncol']]=3
+        print(do.call(plot_grid, p))
+    }
+    dev.off()
+}
+
+plot_pdfs()
