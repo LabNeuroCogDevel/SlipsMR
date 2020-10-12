@@ -7,7 +7,7 @@
 
 
 get_ids <- function(f_name){
-   stringr::str_match(f_name, '(?<=/)\\d{5}') %>% unique
+   stringr::str_match(f_name, '(?<=/)\\d{5}[^/]*') %>% unique
 }
 get_files <- function(subjid) {
   files <- Sys.glob(glue('/Volumes/L/bea_res/Data/Tasks/SlipsOfAction/{subjid}*/*/*.csv'))
@@ -28,6 +28,15 @@ SOADD_data <- function(files) {
 	     resp_raw == "None"                           ~ "None",
 	     TRUE                                         ~ "unkown_state"),
     trial_type=ifelse(deval,'devalued','valued'))
+
+  # before we had a "ver" column, inside and outside fruit were swapped!
+  # wasn't used (yet)
+  if(!'ver' %in% names(soadd)){
+      outside_swap <- soadd$fruit_inside
+      soadd$fruit_inside <- soadd$fruit_outside
+      soadd$fruit_outside <- outside_swap
+  }
+  return(soadd)
 }
 
 plot_SOADD <-function (files) { 
@@ -64,10 +73,16 @@ plot_SOADD <-function (files) {
   return(plot_grid(plt_resp, plt_correct, nrow=2, rel_heights = c(.6,.4)))
 }
 
-ID_data <- function(files) {
+get_boxes <- function(files) {
   box_file <- sprintf("%s/boxes.txt",dirname(files[1]))
   boxes <- read.table(text=system(glue("sed 's/[^A-Za-z.0-9]\\+/ /g' {box_file}"),intern=T))
-  names(boxes) <- c('LR1','stim_fruit','resp_fruit','corret_side')
+  names(boxes) <- c('LR1','stim_fruit','outcome_fruit','correct_side')
+  boxes$file <- box_file
+  return(boxes)
+}
+
+ID_data <- function(files) {
+  boxes <- get_boxes(files)
 
   ID <- files %>%
     grep(pattern="ID", value=T, .) %>%
@@ -80,7 +95,8 @@ ID_data <- function(files) {
     mutate(inside_fruit=ifelse(is.na(fruit_outside), top, fruit_inside),
 	   cor_side = gsub('Direction.(L|R).*','\\1',cor_side),
 	   task=factor(task, levels=c("start","mprage","end")),
-	   tasknum = as.numeric(task)) %>%
+	   tasknum = as.numeric(task),
+           score_raw = ifelse(is.na(score_raw),0, score_raw)) %>%
     select(task,tasknum, trial, onset, LR1, cor_side, score_raw,resp_raw, inside_fruit) %>%
     merge(boxes[,1:3], by="LR1")  %>%
     arrange(tasknum, onset) %>% mutate(n=1:n(), cmscore=cumsum(score_raw))
@@ -136,10 +152,17 @@ survey_data <- function(files){
      rename(side=correct, learned=iscorrect, fruit=disp)
 }
 
+color_lr <- function(side_col) {
+   colors <- ifelse(grepl('L',side_col),'#F8766D','#00BFC4')
+}
+
 plot_survey <- function(files) { 
    subjid <- get_ids(files)
    srvy <- survey_data(files)
-   TF_colors <- c("#2ca25f","#fc9272") # T=green, F=red
+   TF_colors <- c("#2ca25f","red") # T=green, F=red
+   TF_shape <- c(16, 13) # T=filled circle, F=hollow X'ed circle
+
+   boxes <- get_boxes(files)[,1:4]
 
    sidebar <- srvy %>%
      filter(type=="side") %>%
@@ -147,32 +170,61 @@ plot_survey <- function(files) {
      aes(x=side, fill=learned) +
      geom_bar(stat="count") +
      ggtitle(glue('{subjid} survey'))+
-     scale_fill_manual(values=TF_colors, drop=F)
+     scale_fill_manual(values=TF_colors, drop=F) +
+     theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0))
 
-   sidepnt <-
-     srvy %>%
+   fruit_side <- srvy %>%
      filter(type=="side") %>%
-     ggplot() +
-     aes(x=side, y=fruit, color=learned) +
-     geom_point(size=2) +
+     merge(boxes[,2:3] %>% gather(ftype,fruit), by='fruit') %>%
+     mutate(ftype=gsub('_fruit','',ftype))
+
+
+   sidepnt <- 
+     ggplot(fruit_side) +
+     aes(x=side, y=fruit, color=learned, size=c_resp) +
+     geom_point() +
      ggtitle('fruit side')+
-     scale_color_manual(values=TF_colors, drop=F)
+     scale_color_manual(values=TF_colors, drop=F) +
+     facet_grid(ftype~., scales="free_y")
+     #theme(axis.text.y=element_text(colour=outin_axis_colors))
 
-
-   assoc_plt <- srvy %>%
+   fruit_survey <- srvy %>%
      filter(type=="pair") %>%
-     ggplot() +
-     aes(x=fruit, y=pick, color=learned) +
-     geom_point(size=3) +
+     rename(stim_fruit=fruit, picked_pair=pick) %>%
+     merge(boxes %>% select(stim_fruit, outcome_fruit, correct_side),
+           by='stim_fruit', suffixes = c('','.box')) %>%
+     merge(boxes %>% select(outcome_fruit, picked_side=correct_side),
+           by.x='picked_pair', by.y='outcome_fruit') %>%
+     mutate(picked_correct_side = factor(correct_side == picked_side, levels=c(T,F)))
+
+   x_colors <- color_lr(fruit_survey$correct_side[order(fruit_survey$stim_fruit)])
+   y_colors <- color_lr(boxes$correct_side[order(boxes$outcome_fruit)])
+
+   assoc_plt <- ggplot(fruit_survey) +
+     aes(x=stim_fruit, y=picked_pair, color=learned) +
+     geom_point(aes(y=outcome_fruit, color=NULL),size=1) +
+     geom_point(aes(shape=picked_correct_side,size=c_resp)) +
      ggtitle('survey fruit assoc')+
-     scale_color_manual(values=TF_colors, drop=F)
+     scale_color_manual(values=TF_colors, drop=F) +
+     scale_shape_manual(values=TF_shape, drop=F) +
+     theme(axis.text.x=element_text(angle=20, hjust=1, colour=x_colors),
+           axis.text.y=element_text(colour=y_colors))
 
-
-  return(plot_grid(sidebar,
+  returned_grid <-
+      plot_grid(sidebar,
 	     plot_grid(sidepnt   + theme(legend.position="none"),
 		       assoc_plt + theme(legend.position="none"),
 		       nrow=2),
-	     rel_widths=c(1,2)))
+	     rel_widths=c(1,2))
+}
+
+subj_data <- function(subjid) {
+  files <- get_files(subjid)
+  list(ID=ID_data(files),
+       SOADD=SOADD_data(files),
+       survey=survey_data(files),
+       boxes=get_boxes(files),
+       files=files)
 }
 
 plot_behave <- function(subjid) {
@@ -184,7 +236,6 @@ plot_behave <- function(subjid) {
 
 plot_pdfs <- function() {
     subjs_IDmprage <- Sys.glob('/Volumes/L/bea_res/Data/Tasks/SlipsOfAction/*/*/ID_mprage*.csv') %>% get_ids
-    subjid<-'11793'
     subj_plots <- lapply(subjs_IDmprage, plot_behave)
 
     # pdf('imgs/behave.pdf')
@@ -208,3 +259,6 @@ plot_pdfs <- function() {
 }
 
 plot_pdfs()
+
+d88 <-subj_data(subjid='11688') # inspect ID mprage (all kiwi?)
+d93 <-subj_data(subjid='11793') # fix colors
