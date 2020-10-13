@@ -93,13 +93,18 @@ get_tasklogs <- function(files) {
 
 ID_data <- function(files) {
 
-  cat("## ID\n")
-  boxes <- get_boxes(files)
+    cat("## ID\n")
+    boxes <- get_boxes(files)
+    subjid <- get_ids(files)
+  
+    # get only the last of each task/run type
+    ID_all_files <- files %>%
+      grep(pattern="ID", value=T, .)
+    ID_files <- ID_all_files %>% split(stringr::str_extract(ID_all_files, '(start|mprage|end)')) %>% lapply(last) %>% unlist
 
-  ID <- files %>%
-    grep(pattern="ID", value=T, .) %>%
-    grep(invert=T,pattern="10.39.46", value=T, .) %>%
-    lapply(function(f) read.csv(f, stringsAsFactors=F)%>%
+
+    ID <- ID_files %>%
+        lapply(function(f) read.csv(f, stringsAsFactors=F)%>%
 		       mutate(resp_raw=as.character(resp_raw),
 			      task=gsub('.*ID_(mprage|start|end).*','\\1',f))) %>%
     bind_rows %>%
@@ -111,13 +116,17 @@ ID_data <- function(files) {
            score_raw = ifelse(is.na(score_raw),0, score_raw)) %>%
     select(task,tasknum, trial, onset, LR1, cor_side, score_raw,resp_raw, inside_fruit) %>%
     merge(boxes[,1:3], by="LR1")  %>%
-    arrange(tasknum, onset) %>% mutate(n=1:n(), cmscore=cumsum(score_raw))
+    arrange(tasknum, onset) %>%
+    mutate(n=1:n(),
+           cmscore=cumsum(score_raw),
+           id=subjid)
 }
 plot_ID <- function(files) {
 
   subjid <- get_ids(files)
   ID <- ID_data(files)
 
+  # not all that useful
   plt_cumlative_all <- ggplot(ID) +
     aes(x=n,y=cmscore, linetype=task) +
     geom_line() +
@@ -125,16 +134,37 @@ plot_ID <- function(files) {
     theme(legend.position = "none") + 
     ggtitle(glue("{subjid} ID perf"))
 
+  # overall correct
+  plt_prct_correct <- ID %>%
+      group_by(task) %>%
+      summarise(percent_correct=sum(score_raw)/n()) %>% 
+      ggplot() + aes(x=task, y=percent_correct, fill=percent_correct) +
+      geom_bar(stat="identity") +
+      scale_fill_continuous(limits=c(.25, 1.1))+
+      scale_y_continuous(limits=c(0,1)) +
+      theme(legend.position = "none") + 
+      ggtitle(glue("{subjid} ID perf"))
+  
+
+  ID_fruitscore <- ID %>%
+      group_by(stim_fruit) %>%
+      mutate(nseen=1:n(),
+	     fruit_cmscore=cumsum(score_raw),
+             iscor=score_raw==1)
+
   plt_cumlative_fruit <-
-    ID %>% group_by(stim_fruit) %>%
-    mutate(nseen=1:n(),
-	   fruit_cmscore=cumsum(score_raw)) %>%
-    ggplot() +
+    ggplot(ID_fruitscore) +
     aes(x=n, y=fruit_cmscore,
 	color=stim_fruit, linetype=task,
 	group=paste(task,stim_fruit)) +
     geom_line() +
-    scale_linetype_manual(values=c(2,1,2))
+    geom_point(data=ID_fruitscore %>% filter(score_raw!=1),
+               aes(shape=iscor))+
+    scale_linetype_manual(values=c(2,1,2))+
+    scale_x_continuous(limits=c(0,max(ID$n)), breaks=c(0,max(ID$n)))+
+    scale_y_continuous(limits=c(0,50)) +
+    scale_shape_manual(values=c(4)) + 
+    guides(shape=FALSE)
 
   cor_rat <-  ID %>%
     group_by(task, stim_fruit) %>%
@@ -151,7 +181,7 @@ plot_ID <- function(files) {
     theme(axis.text.x=element_text(angle=45, hjust=1))
 
   return(plot_grid(
-    plot_grid(plt_cumlative_all, plt_cumlative_fruit, ncol=2),
+    plot_grid(plt_prct_correct, plt_cumlative_fruit, ncol=2),
     plt_ratio, nrow=2))
 }
 
@@ -349,6 +379,7 @@ plot_behave <- function(subjid) {
 
 plot_pdfs <- function() {
     subjs_IDmprage <- Sys.glob('/Volumes/L/bea_res/Data/Tasks/SlipsOfAction/*/*/ID_mprage*.csv') %>% get_ids
+    cat("# have", length(subjs_IDmprage), " subjects\n")
     subj_plots <- lapply(subjs_IDmprage, plot_behave)
 
     # pdf('imgs/behave.pdf')
@@ -371,7 +402,12 @@ plot_pdfs <- function() {
     dev.off()
 }
 
-plot_pdfs()
+examples <- function(){
+    d88 <-subj_data(subjid='11688') # inspect ID. fix NA score
+    d93 <-subj_data(subjid='11793') # fix colors
+}
 
-d88 <-subj_data(subjid='11688') # inspect ID. fix NA score
-d93 <-subj_data(subjid='11793') # fix colors
+# when ./visualize_behave.R,  not when sourced
+if (sys.nframe() == 0)
+    plot_pdfs()
+
