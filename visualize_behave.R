@@ -11,11 +11,14 @@ get_ids <- function(f_name){
    stringr::str_match(f_name, '(?<=/)\\d{5}[^/]*') %>% unique
 }
 get_files <- function(subjid) {
+  cat(glue("# getting files: {subjid}"),"\n")
   files <- Sys.glob(glue('/Volumes/L/bea_res/Data/Tasks/SlipsOfAction/{subjid}*/*/*.csv'))
 }
 
 
 SOADD_data <- function(files) {
+
+  cat("## SOADD\n")
   soadd <- files %>%
     grep(., pattern='DD|SOA', value=T) %>%
     lapply(read.csv) %>%
@@ -33,6 +36,7 @@ SOADD_data <- function(files) {
   # before we had a "ver" column, inside and outside fruit were swapped!
   # wasn't used (yet)
   if(!'ver' %in% names(soadd)){
+      cat("# WARNING: swaping inside and outside fruit columns b/c old version of output\n")
       outside_swap <- soadd$fruit_inside
       soadd$fruit_inside <- soadd$fruit_outside
       soadd$fruit_outside <- outside_swap
@@ -82,7 +86,14 @@ get_boxes <- function(files) {
   return(boxes)
 }
 
+get_tasklogs <- function(files) {
+  tasklogs <- Sys.glob(sprintf("%s/tasklog*.txt",dirname(files[1])))
+  return(tasklogs)
+}
+
 ID_data <- function(files) {
+
+  cat("## ID\n")
   boxes <- get_boxes(files)
 
   ID <- files %>%
@@ -145,6 +156,8 @@ plot_ID <- function(files) {
 }
 
 OD_data <- function(files) {
+
+  cat("## OD\n")
   OD <- files %>%
     grep(pattern="OD", value=T, .) %>%
     last %>%
@@ -171,7 +184,7 @@ plot_OD <- function(files) {
              status =gsub('_fruit','',status),
              pos = ifelse(status=="valued",value_pos, deval_pos))
 
-  x_colors <- x %>% filter(!deval) %>% select(cor_side, fruit=top) %>% distinct %>% 
+  x_colors <- OD %>% filter(!deval) %>% select(cor_side, fruit=top) %>% distinct %>% 
             with(cor_side[order(fruit)]) %>% color_lr
 
   OD_plot <- ggplot(dbled) +
@@ -182,13 +195,73 @@ plot_OD <- function(files) {
       scale_fill_manual(values=c("black", "gray33", "green", "lightgreen")) +
       theme(axis.text.x=element_text(angle=20, hjust=1, colour=x_colors))
 }
+
+fix_survey <- function(srvy, files, save=FALSE){
+    name_order <- names(srvy)
+    srvy$rowidx <- 1:nrow(srvy)
+    log <- get_tasklogs(files) %>% last
+    # boxes <- get_boxes(files) %>% select(fruit=stim_fruit, shown=outcome_fruit)
+    perlcmd <- "perl -lne  '
+        next unless m/([a-z]+); showing \\[(.*)\\]/;
+        $f=$1; $l=$2; $l=~s/\\x27 ?//g;
+        print join \" \", $f, split /,/, $l;'"
+    x <- read.table(text=system(paste0(perlcmd, " < ", log), intern=T))
+    names(x)[1] <- 'correct'
+    x$type <- 'pair'
+    x$n = 1:nrow(x)
+    # we find what index "pick" is in V2-V6.
+    # reverse that (5-x) and get the actual pick again from V2-V6
+    # if the new pick matches side. it should be correct
+    m <- merge(srvy, x, by=c('correct','type')) %>% select(correct, pick, V2:V6)
+    w <- m %>% gather(idx, options, -correct,-pick) %>%
+        mutate(idx=as.numeric(substr(idx,2,2))-1) %>% # V2..V6 -> 1..5
+        group_by(correct, pick) %>%
+        mutate(pick_idx=which(pick==options)) %>%
+        mutate(f_resp=6-pick_idx)
+    redo <- w %>%
+        filter(f_resp == idx) %>%
+        ungroup() %>%
+        select(correct, pick=options, f_resp) %>%
+        mutate(type="pair")
+
+    m.sr <- merge(srvy, redo,
+            by=c('correct', 'type'), suffixes = c('','.new'),all.x=T)
+    corrected <- m.sr %>%
+        mutate_if(is.factor, as.character) %>%
+        mutate(pick=ifelse(is.na(pick.new),pick,pick.new),
+                f_resp=ifelse(is.na(f_resp.new),f_resp,f_resp.new)) %>%
+        select(-pick.new, -f_resp.new) %>%
+        mutate(iscorrect = ifelse(pick==correct, 'True', 'False'),
+               ver="0.0.corrected") %>%
+        arrange(rowidx) 
+
+    corrected <- corrected[,c(name_order,'ver')]
+    if(save){
+        save_as <- grep(pattern="SURVEY", value=T, files) %>%
+            last %>% gsub('.csv$','_frtPrCorrected.csv',.)
+        write.table(corrected, file=save_as, sep=" ", quote=F, row.names=F)
+    }
+
+    return(corrected)
+}
+
 survey_data <- function(files){
+
+   cat("## Survey\n")
    srvy <- files %>%
      grep(pattern="SURVEY", value=T, .) %>%
-     read.table(header=T) %>%
+     last() %>%
+     read.table(header=T)
+   if(! 'ver' %in% names(srvy)) {
+       cat("# WARNING: survey old version. FIXING\n")
+       srvy <- fix_survey(srvy, files, TRUE)
+   }
+   parsed_srvy <- srvy %>%
      mutate(iscorrect=iscorrect=="True",
             iscorrect = factor(iscorrect, levels=c(T,F))) %>%
      rename(side=correct, learned=iscorrect, fruit=disp)
+
+   return(parsed_srvy)
 }
 
 color_lr <- function(side_col) {
