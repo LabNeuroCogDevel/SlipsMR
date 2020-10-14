@@ -101,10 +101,19 @@ mk1d_from_folder <- function(infolder){
      dir.create(outfolder,recursive=T)
 
   findcsv(infolder, 'OD')  %>% mktime(pfix=paste0(outfolder,'OD'))
-  findcsv(infolder, 'SOA')  %>%
+
+  soa_data <- findcsv(infolder, 'SOA') 
+  dd_data <- findcsv(infolder, 'DD') 
+  # old version doesn't have blocks
+  if(! 'extra' %in% names(soa_data)){
+     cat("# old soa input, skipping 1d files creation for", infolder, "\n")
+     return()
+   }
+
+  soa_data  %>%
       fix_bad_onsets %>%
       mktime(pfix=paste0(outfolder,'SOA'))
-  findcsv(infolder, 'DD')  %>%
+  dd_data %>%
       fix_bad_onsets %>%
       mktime(pfix=paste0(outfolder,'DD'))
 
@@ -150,11 +159,28 @@ mk1d_from_folder <- function(infolder){
   blkdir <- paste(sep="/", outfolder, 'blks')
   if(!dir.exists(blkdir)) dir.create(blkdir, recursive=T)
 
+  cat("# by block")
   cat("# writting SOA.1d and DD.1d to", blkdir,"\n")
-  soa_blk <- findcsv(infolder, 'SOA') %>% to_block %>%
+  soa_blk <- soa_data %>% to_block %>%
       LNCDR::save1D('onset', file.path(blkdir,"SOA.1d"), dur='dur', nblocks=1)
-  dd_blk <- findcsv(infolder, 'DD')  %>% to_block %>%
+  dd_blk <- dd_data %>% to_block %>%
       LNCDR::save1D('onset', file.path(blkdir,"DD.1d"), dur='dur', nblocks=1)
+
+
+   write_byndeval <- function(d, name) {
+      filter(d, extra != "None") %>%
+           mutate(ndeval=stringr::str_match(extra, '\\d$')) %>%
+           split(.$ndeval) %>%
+           lapply(function(x){
+                     ndeval <- first(x$ndeval)
+                     outfile <- file.path(blkdir,sprintf("%s_%sdeval.1d",name, ndeval))
+                     cat("#  ",outfile,"\n")
+                     x %>% to_block %>% LNCDR::save1D('onset', outfile, dur='dur', nblocks=1)
+           })
+
+   }
+  soa_blkval <- soa_data %>% write_byndeval('SOA')
+  dd_blkval <- dd_data %>% write_byndeval('DD')
 }
 
 fix_bad_onsets <- function(soadd) {
