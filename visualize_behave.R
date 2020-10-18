@@ -19,6 +19,7 @@ get_files <- function(subjid) {
 SOADD_data <- function(files) {
 
   cat("## SOADD\n")
+  subjid <- get_ids(files)
   soadd <- files %>%
     grep(., pattern='DD|SOA', value=T) %>%
     lapply(read.csv) %>%
@@ -31,7 +32,8 @@ SOADD_data <- function(files) {
 	     resp_raw != "None" & score_raw == 0          ~ "wrong_dir", 
 	     resp_raw == "None"                           ~ "None",
 	     TRUE                                         ~ "unkown_state"),
-    trial_type=ifelse(deval,'devalued','valued'))
+    trial_type=ifelse(deval,'devalued','valued'),
+    subjid=subjid)
 
   # before we had a "ver" column, inside and outside fruit were swapped!
   # wasn't used (yet)
