@@ -7,6 +7,7 @@
 #remotes::install_github("coolbutuseless/ggpattern")
 
 
+na_replace <- function(x, y) ifelse(is.na(x), y, x)
 get_ids <- function(f_name){
    stringr::str_match(f_name, '(?<=/)\\d{5}[^/]*') %>% unique
 }
@@ -45,6 +46,16 @@ SOADD_data <- function(files) {
   }
   return(soadd)
 }
+SOADD_summary <- function(soadd) {
+  soadd_smry <- soadd %>%
+    mutate(responded = resp_raw!="None") %>%
+    group_by(deval, task, ndeval, subjid) %>%
+    mutate(total_trials=n()) %>%
+    group_by(responded, deval, task, ndeval, total_trials, subjid, .drop = FALSE) %>%
+    tally() %>%
+    mutate(trial_type=ifelse(deval,'devalued','valued'),
+           rat = n/total_trials) 
+}
 
 plot_SOADD <-function (files) { 
   subjid <- get_ids(files)
@@ -58,15 +69,7 @@ plot_SOADD <-function (files) {
     scale_fill_manual(values=c("pink","lightgreen")) +
     theme(axis.text.x=element_text(angle=20, hjust=1))
 
-  soadd_smry <- soadd %>%
-    mutate(responded = resp_raw!="None") %>%
-    group_by(deval, task, ndeval) %>%
-    mutate(total_trials=n()) %>%
-    group_by(responded, deval, task, ndeval, total_trials) %>%
-    tally() %>%
-    mutate(trial_type=ifelse(deval,'devalued','valued'),
-           rat = n/total_trials) 
-
+  soadd_smry <- SOADD_summary(soadd)
   plt_resp <-
     ggplot(soadd_smry)+
     aes(x=trial_type, y=rat, fill=responded, label=paste(n,"/",total_trials))+
@@ -377,6 +380,105 @@ plot_behave <- function(subjid) {
               SOADD=plot_SOADD(files),
               OD=plot_OD(files),
               survey=plot_survey(files)))
+}
+
+survey_pref <- function(subjid){
+  # number "learned" from survey max is 18
+  subj_files <- get_files(subjid)
+  srvydata <- survey_data(subj_files)
+  return(sum(srvydata$learned=="TRUE"))
+}
+
+plot_per_task <- function(){
+    all_ids <- Sys.glob('/Volumes/L/bea_res/Data/Tasks/SlipsOfAction/*/*/ID_mprage*.csv') %>% get_ids
+    d_id <- data.frame(fileid=all_ids,
+               id=gsub('_[0-9]+yo.','', all_ids),
+               age=as.numeric(gsub('.*_(\\d*)y.*', '\\1', all_ids)),
+               sex=stringr::str_extract(all_ids,'[fm]')) %>%
+        mutate(group=cut(age, breaks=c(0,13,Inf), labels=c('younger','older')),
+               srvy=Vectorize(survey_pref)(fileid),
+               ) %>%
+        arrange(age)
+
+    soadd <- lapply(all_ids,function(f) SOADD_data(get_files(f))) %>%
+        bind_rows %>%
+        merge(d_id, by.x='subjid', by.y='fileid')
+
+    # get summary and add agegroup and pref columns
+    soadd_smry <- SOADD_summary(soadd) %>%
+        merge(d_id, by.x='subjid', by.y='fileid')
+
+    all_soa <-
+      ggplot(soadd_smry)+
+      aes(x=trial_type, y=rat, fill=responded, label=paste(n,"/",total_trials))+
+      geom_bar(stat="identity")+
+      geom_label(data=soadd_smry%>%filter(!responded), aes(y=1)) +
+      facet_grid(group*age*srvy~task*ndeval) + 
+      scale_fill_manual(values=c("gray50","lightblue"))+
+      theme(axis.text.x=element_text(angle=20, hjust=1))+
+      ggtitle(glue("SOA+DD"))
+
+    # need to add 0's back in
+    deval2resp <- soadd_smry %>%
+        filter(ndeval==2, task=="SOA", trial_type=="devalued", deval, responded) %>%
+        merge(d_id, by.x='subjid', by.y='fileid', all.y=T) %>%
+        mutate(n=na_replace(n,0),
+               total_trials=na_replace(total_trials,16))
+
+
+    srvy_scale <- scale_color_gradient(low="red",high="#2ca25f")
+    
+    plt_deval2resp <- ggplot(deval2resp) +
+        aes(x=age, y=n) +
+        #geom_label(aes(y=n+.5, label=paste(n,"/",total_trials))) +
+        geom_point(aes(color=srvy)) +
+        srvy_scale +
+        #theme(legend.position = "none") + 
+        ggtitle('count of responses on no-response\n devalue trials (SOA, ndeval=2: n=16)') +
+        ylab('responses')
+
+    plt_srvy <- ggplot(d_id) +
+        aes(x=age, y=srvy, color=srvy) +
+        geom_point() +
+        srvy_scale +
+        ggtitle('survey performance (Q: 12 L/R, 6 assoc)')+
+        ylab('correct responses')
+
+    
+  ID <- lapply(all_ids,function(f) ID_data(get_files(f))) %>%
+        bind_rows
+
+  prct_correct <- ID %>%
+      group_by(id, task) %>%
+      summarise(percent_correct=sum(score_raw)/n()) %>% 
+      merge(d_id, by.x='id', by.y='fileid')
+
+  plt_id_end_age  <-
+      prct_correct %>%
+      filter(task=="end") %>%
+      ggplot() +
+      aes(x=age, y=percent_correct, color=srvy) +
+      geom_point() +
+      ggtitle("last ID block performance by age") +
+      srvy_scale +
+      ylab("correct side response/total")
+
+  plt_prct_corr <- 
+      ggplot(prct_correct) +
+      aes(x=task, y=percent_correct, fill=percent_correct) +
+      geom_bar(stat="identity") +
+      scale_fill_continuous(limits=c(.25, 1.1))+
+      scale_y_continuous(limits=c(0,1)) +
+      facet_wrap(~group*age*srvy) +
+      theme(legend.position = "none") + 
+      ggtitle("ID perf")
+    
+
+  pdf('imgs/per_block.pdf')
+  print(plot_grid(plt_srvy, plt_id_end_age,  plt_deval2resp, nrow=3))
+  print(plt_prct_corr)  
+  print(all_soa)
+  dev.off()
 }
 
 plot_pdfs <- function() {
