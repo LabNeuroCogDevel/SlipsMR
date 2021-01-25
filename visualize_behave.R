@@ -13,7 +13,9 @@ get_ids <- function(f_name){
 }
 get_files <- function(subjid) {
   cat(glue("# getting files: {subjid}"),"\n")
-  files <- Sys.glob(glue('/Volumes/L/bea_res/Data/Tasks/SlipsOfAction/{subjid}*/*/*.csv'))
+  files <- Sys.glob(glue('/Volumes/L/bea_res/Data/Tasks/SlipsOfAction/{subjid}*/*/*.csv')) %>%
+      grep(pattern="_wide", invert=T, value=T)
+
 }
 
 
@@ -21,10 +23,17 @@ SOADD_data <- function(files) {
 
   cat("## SOADD\n")
   subjid <- get_ids(files)
-  soadd <- files %>%
+  soadd_all <- files %>%
     grep(., pattern='DD|SOA', value=T) %>%
     lapply(read.csv) %>%
-    bind_rows %>%
+    bind_rows
+
+  if(! "extra" %in% names(soadd_all)){
+    cat("# adding 'extra' column for old task -- always 2 devalued\n")
+    soadd_all$extra <- paste(gsub(".*\\.","",soadd_all$phase), "_2")
+  }
+
+  soadd <- soadd_all %>%
     separate(extra,c('task','ndeval')) %>%
     filter(ttype == "TrialType.SHOW") %>%
     mutate(deval = deval == 'True',
@@ -73,8 +82,13 @@ plot_SOADD <-function (files) {
   plt_resp <-
     ggplot(soadd_smry)+
     aes(x=trial_type, y=rat, fill=responded, label=paste(n,"/",total_trials))+
-    geom_bar(stat="identity")+
-    geom_label(data=soadd_smry%>%filter(!responded), aes(y=1)) +
+    geom_bar(stat="identity")
+
+  no_resp <- soadd_smry%>%filter(!responded)
+  if(nrow(no_resp)>0L)
+      plt_resp <- plt_resp + geom_label(data=no_resp, aes(y=1))
+
+  plt_resp <- plt_resp + 
     facet_grid(task~ndeval) + 
     scale_fill_manual(values=c("gray50","lightblue"))+
     theme(axis.text.x=element_text(angle=20, hjust=1))+
@@ -92,7 +106,10 @@ get_boxes <- function(files) {
 }
 
 get_tasklogs <- function(files) {
-  tasklogs <- Sys.glob(sprintf("%s/tasklog*.txt",dirname(files[1])))
+  mydir <- dirname(files[1])
+  tasklogs <- Sys.glob(sprintf("%s/tasklog*.txt", mydir))
+  if(length(tasklogs)==0L)
+      cat("# ERROR: no tasklogs*.txt in", mydir, "\n")
   return(tasklogs)
 }
 
@@ -105,25 +122,47 @@ ID_data <- function(files) {
     # get only the last of each task/run type
     ID_all_files <- files %>%
       grep(pattern="ID", value=T, .)
-    ID_files <- ID_all_files %>% split(stringr::str_extract(ID_all_files, '(start|mprage|end)')) %>% lapply(last) %>% unlist
+
+    if(length(ID_all_files)==0L) error("no ID files for", subjid)
+
+    ID_files <- ID_all_files %>%
+        split(stringr::str_extract(ID_all_files, '(start|mprage|end|ID_[0-9])')) %>%
+        lapply(last) %>%
+        unlist
 
 
-    ID <- ID_files %>%
-        lapply(function(f) read.csv(f, stringsAsFactors=F)%>%
-		       mutate(resp_raw=as.character(resp_raw),
-			      task=gsub('.*ID_(mprage|start|end).*','\\1',f))) %>%
-    bind_rows %>%
-    filter(ttype=="TrialType.SHOW") %>%
-    mutate(inside_fruit=ifelse(is.na(fruit_outside), top, fruit_inside),
-	   cor_side = gsub('Direction.(L|R).*','\\1',cor_side),
-	   task=factor(task, levels=c("start","mprage","end")),
-	   tasknum = as.numeric(task),
-           score_raw = ifelse(is.na(score_raw),0, score_raw)) %>%
-    select(task,tasknum, trial, onset, LR1, cor_side, score_raw,resp_raw, inside_fruit) %>%
-    merge(boxes[,1:3], by="LR1")  %>%
-    arrange(tasknum, onset) %>%
-    mutate(n=1:n(),
-           cmscore=cumsum(score_raw),
+    ID_read <-
+        ID_files %>%
+        lapply(function(f)
+                read.csv(f, stringsAsFactors=F)%>%
+		mutate(resp_raw=as.character(resp_raw),
+		       task=gsub('.*ID_(mprage|start|end|[0-9]).*','\\1',f),
+                       task=gsub('^\\d$','single',task))) %>%
+        bind_rows
+
+    # 20210125
+    if(!"fruit_outside" %in% names(ID_read)) {
+        cat("# merging for old ID version\n")
+        boxes_merge <- boxes %>%
+            select(LR1, fruit_outside=stim_fruit, fruit_inside=outcome_fruit)
+
+        ID_read <- ID_read %>%
+            left_join(boxes_merge, by="LR1") %>%
+            arrange(blocknum, trial)
+    }
+
+    ID <- ID_read %>%
+     filter(ttype=="TrialType.SHOW") %>%
+     mutate(inside_fruit=ifelse(is.na(fruit_outside), top, fruit_inside),
+            cor_side = gsub('Direction.(L|R).*','\\1',cor_side),
+            task=factor(task, levels=c("start","mprage","end","single")),
+            tasknum = as.numeric(task),
+            score_raw = ifelse(is.na(score_raw),0, score_raw)) %>%
+     select(task,tasknum, trial, onset, LR1, cor_side, score_raw,resp_raw, inside_fruit) %>%
+     merge(boxes[,1:3], by="LR1")  %>%
+     arrange(tasknum, onset) %>%
+     mutate(n=1:n(),
+            cmscore=cumsum(score_raw),
            id=subjid)
 }
 plot_ID <- function(files) {
@@ -235,6 +274,8 @@ fix_survey <- function(srvy, files, save=FALSE){
     name_order <- names(srvy)
     srvy$rowidx <- 1:nrow(srvy)
     log <- get_tasklogs(files) %>% last
+    # no log!
+    if(is.na(log)) return(NULL)
     # boxes <- get_boxes(files) %>% select(fruit=stim_fruit, shown=outcome_fruit)
     perlcmd <- "perl -lne  '
         next unless m/([a-z]+); showing \\[(.*)\\]/;
@@ -291,6 +332,9 @@ survey_data <- function(files){
        cat("# WARNING: survey old version. FIXING\n")
        srvy <- fix_survey(srvy, files, TRUE)
    }
+
+   if(is.null(srvy)) return(NULL)
+
    parsed_srvy <- srvy %>%
      mutate(iscorrect=iscorrect=="True",
             iscorrect = factor(iscorrect, levels=c(T,F))) %>%
@@ -306,6 +350,8 @@ color_lr <- function(side_col) {
 plot_survey <- function(files) { 
    subjid <- get_ids(files)
    srvy <- survey_data(files)
+   if(is.null(srvy)) return(NULL)
+
    TF_colors <- c("#2ca25f","red") # T=green, F=red
    TF_shape <- c(16, 13) # T=filled circle, F=hollow X'ed circle
 
@@ -482,7 +528,8 @@ plot_per_task <- function(){
 }
 
 plot_pdfs <- function() {
-    subjs_IDmprage <- Sys.glob('/Volumes/L/bea_res/Data/Tasks/SlipsOfAction/*/*/ID_mprage*.csv') %>% get_ids
+    # subjs_IDmprage <- Sys.glob('/Volumes/L/bea_res/Data/Tasks/SlipsOfAction/1*_2*/*/ID_mprage*.csv') %>% get_ids
+    subjs_IDmprage <- Sys.glob('/Volumes/L/bea_res/Data/Tasks/SlipsOfAction/1*_2*/*/ID*.csv') %>% get_ids
     cat("# have", length(subjs_IDmprage), " subjects\n")
     subj_plots <- lapply(subjs_IDmprage, plot_behave)
 
